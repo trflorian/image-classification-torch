@@ -8,6 +8,7 @@ dependencies = [
     "lightning>=2.5.0.post0",
     "numpy>=2.2.1",
     "torch>=2.5.1",
+    "torchvision>=0.20.1",
 ]
 
 [[tool.uv.index]]
