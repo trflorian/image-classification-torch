@@ -11,3 +11,6 @@ wheels/
 
 # Dataset
 data/
+
+# Pytorch Lightning logs
+lightning_logs/
