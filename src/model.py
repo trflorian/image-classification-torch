@@ -22,7 +22,7 @@ class ImageClassificationCNN(L.LightningModule):
         # freeze all layers except the last one
         for param in self.model.parameters():
             param.requires_grad = False
-        for param in self.model.classifier.parameters():
+        for param in self.model.classifier[3].parameters():
             param.requires_grad = True
 
         metrics = MetricCollection(
@@ -35,6 +35,8 @@ class ImageClassificationCNN(L.LightningModule):
         self.val_metrics = metrics.clone(prefix="val_")
         self.test_metrics = metrics.clone(prefix="test_")
 
+        self.loss = torch.nn.CrossEntropyLoss()
+
     def forward(self, x):
         return self.model(x)
 
@@ -42,12 +44,13 @@ class ImageClassificationCNN(L.LightningModule):
         x, y = batch
 
         logits = self(x)
-        loss = torch.nn.functional.cross_entropy(logits, y)
+        loss = self.loss(logits, y)
+        y_pred = torch.argmax(logits, dim=1)
 
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
 
-        self.train_metrics(logits, y)
-        self.log_dict(self.train_metrics, on_step=True, on_epoch=False, prog_bar=True)
+        self.train_metrics(y_pred, y)
+        self.log_dict(self.train_metrics, on_step=False, on_epoch=True, prog_bar=True)
 
         return loss
 
@@ -55,23 +58,25 @@ class ImageClassificationCNN(L.LightningModule):
         x, y = batch
 
         logits = self(x)
-        loss = torch.nn.functional.cross_entropy(logits, y)
+        loss = self.loss(logits, y)
+        y_pred = torch.argmax(logits, dim=1)
 
-        self.log("val_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
 
-        self.val_metrics(logits, y)
-        self.log_dict(self.val_metrics, on_step=True, on_epoch=False, prog_bar=True)
+        self.val_metrics(y_pred, y)
+        self.log_dict(self.val_metrics, on_step=False, on_epoch=True, prog_bar=True)
 
     def test_step(self, batch, batch_idx):
         x, y = batch
 
         logits = self(x)
-        loss = torch.nn.functional.cross_entropy(logits, y)
+        loss = self.loss(logits, y)
+        y_pred = torch.argmax(logits, dim=1)
 
-        self.log("test_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
 
-        self.test_metrics(logits, y)
-        self.log_dict(self.test_metrics, on_step=True, on_epoch=False, prog_bar=True)
+        self.test_metrics(y_pred, y)
+        self.log_dict(self.test_metrics, on_step=False, on_epoch=True, prog_bar=True)
 
     def configure_optimizers(self):
         return torch.optim.AdamW(self.parameters(), lr=self.hparams.learning_rate)

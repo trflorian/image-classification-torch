@@ -14,3 +14,6 @@ data/
 
 # Pytorch Lightning logs
 lightning_logs/
+
+# Checkpoints
+checkpoints/
