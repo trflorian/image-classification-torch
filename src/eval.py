@@ -6,6 +6,12 @@ from model import ImageClassificationCNN
 print("Loading model...", flush=True)
 model = ImageClassificationCNN.load_from_checkpoint("checkpoints/model.ckpt")
 model.eval().cuda()
+gradcam_enabled = False
+activations = {}
+target_layer = model.model.features[-1]
+target_layer.register_forward_hook(
+    lambda _module, _inputs, output: activations.update(feature_map=output)
+)
 
 print("Opening webcam...", flush=True)
 cap = cv2.VideoCapture(0)
@@ -15,8 +21,12 @@ def convert_cv2_to_torch(frame):
     frame = cv2.resize(frame, (224, 224))
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     frame = frame / 255.0
+    frame = torch.tensor(frame).permute(2, 0, 1).unsqueeze(0).float()
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+    frame = (frame - mean) / std
 
-    return torch.tensor(frame).permute(2, 0, 1).unsqueeze(0).float().cuda()
+    return frame.cuda()
 
 
 label_mapping = {"usb_a": 0, "usb_c": 1, "usb_micro": 2, "usb_mini": 3}
@@ -35,7 +45,28 @@ while True:
 
     frame_tensor = convert_cv2_to_torch(frame)
 
-    logits = model(frame_tensor)
+    activations.clear()
+    if gradcam_enabled:
+        with torch.enable_grad():
+            frame_tensor.requires_grad_(True)
+            logits = model(frame_tensor)
+            predicted_for_cam = logits.argmax(dim=1).item()
+            gradients = torch.autograd.grad(
+                logits[0, predicted_for_cam], activations["feature_map"]
+            )[0]
+
+        feature_map = activations["feature_map"].detach()[0]
+        weights = gradients.detach()[0].mean(dim=(1, 2))
+        cam = torch.relu((weights[:, None, None] * feature_map).sum(dim=0))
+        cam -= cam.min()
+        cam /= cam.max().clamp_min(1e-8)
+        cam = cv2.resize(cam.cpu().numpy(), (frame.shape[1], frame.shape[0]))
+        heatmap = cv2.applyColorMap((cam * 255).astype("uint8"), cv2.COLORMAP_JET)
+        frame = cv2.addWeighted(frame, 0.6, heatmap, 0.4, 0)
+    else:
+        with torch.no_grad():
+            logits = model(frame_tensor)
+
     confidences = torch.nn.functional.sigmoid(logits)
 
     _, predicted_class = torch.max(logits, 1)
@@ -58,7 +89,7 @@ while True:
     cv2.rectangle(display, (8, 8), (width - 9, banner_height - 8), (70, 70, 70), 1)
     cv2.putText(
         display,
-        f"Prediction: {predicted_name}",
+        f"Prediction: {predicted_name}   Grad-CAM: {'ON' if gradcam_enabled else 'OFF'} (G)",
         (18, 36),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.75,
@@ -97,8 +128,11 @@ while True:
 
     cv2.imshow("frame", display)
 
-    if cv2.waitKey(1) & 0xFF == ord("q"):
+    key = cv2.waitKey(1) & 0xFF
+    if key == ord("q"):
         break
+    if key == ord("g"):
+        gradcam_enabled = not gradcam_enabled
 
 cap.release()
 cv2.destroyAllWindows()
